@@ -5,8 +5,20 @@ using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
 using MongoDB.EntityFrameworkCore.Extensions;
 
-// Create a database session and ensure the vector index defined in the EF Core model is created in the
-// database and is ready for queries.
+// The following code can be used to create embeddings. You will need to pass in your own API key, which
+// can be obtained from VoyageAI. See https://www.mongodb.com/docs/atlas/atlas-vector-search/create-embeddings/
+
+// var texts = new []
+// {
+//     "Titanic: The story of the 1912 sinking of the largest luxury liner ever built",
+//     "The Lion King: Lion cub and future king Simba searches for his identity",
+//     "Avatar: A marine is dispatched to the moon Pandora on a unique mission"
+// };
+//
+// await new EmbeddingGenerator("Your Voyage API key here.").GetEmbeddingsAsync(texts);
+
+// Create a database session and ensure the vector index defined in the
+// EF Core model is created in the database and is ready for queries.
 
 using var db = new MoviesDbContext();
 
@@ -46,18 +58,18 @@ PrintMovieResults(timeTravelMovies, "'time travel'");
 
 var eightiesTimeTravelMovies = await db.Movies.VectorSearch(
         e => e.PlotEmbedding,
-        preFilter: e => e.year >= 1980 && e.year < 1990,
+        preFilter: e => e.Year >= 1980 && e.Year < 1990,
         timeTravelEmbedding,
         limit: 10)
     .ToListAsync();
 
-PrintMovieResults(eightiesTimeTravelMovies, "'time travel' from the 1980s");
+PrintMovieResults(eightiesTimeTravelMovies, "'80s 'time travel'");
 
 // Project search results and include score.
 
 var projectedMoviesWithScore = await db.Movies.VectorSearch(
         e => e.PlotEmbedding,
-        preFilter: e => e.year >= 1980 && e.year < 1990,
+        preFilter: e => e.Year >= 1980 && e.Year < 1990,
         timeTravelEmbedding,
         limit: 10)
     .Select(e => new
@@ -68,22 +80,34 @@ var projectedMoviesWithScore = await db.Movies.VectorSearch(
         Score = EF.Property<float>(e, "__score")
     }).ToListAsync();
 
-Console.WriteLine($"Projecting details and score from {projectedMoviesWithScore.Count} movies:");
+Console.WriteLine(
+    $"Projecting details and score from " +
+    $"{projectedMoviesWithScore.Count} movies:");
+
 i = 1;
 foreach (var movie in projectedMoviesWithScore)
 {
-    Console.WriteLine($"  {i++}: (Score: {movie.Score}) '{movie.Title}' with plot '{movie.Plot?.Substring(0, 20)}...'");
+    Console.WriteLine(
+        $"  {i++}: (Score: {movie.Score}) '{movie.Title}' " +
+        $"with plot '{movie.Plot?.Substring(0, 20)}...'");
 }
 
 // Print movie results to the console.
 
-void PrintMovieResults(List<EmbeddedMovie> movies, string? embeddingDescription)
+void PrintMovieResults(
+    List<EmbeddedMovie> movies,
+    string? embeddingDescription)
 {
-    Console.WriteLine($"Found {movies.Count} movies with plots similar to {embeddingDescription}:");
+    Console.WriteLine(
+        $"Found {movies.Count} movies with plots " +
+        $"similar to {embeddingDescription}:");
+    
     i = 1;
     foreach (var movie in movies)
     {
-        Console.WriteLine($"  {i++}: '{movie.Title}' with plot '{movie.Plot?.Substring(0, 20)}...'");
+        Console.WriteLine(
+            $"  {i++}: '{movie.Title}' " +
+            $"with plot '{movie.Plot?.Substring(0, 20)}...'");
     }
 }
 
@@ -91,11 +115,12 @@ void PrintMovieResults(List<EmbeddedMovie> movies, string? embeddingDescription)
 
 public class MoviesDbContext : DbContext
 {
-    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    protected override void OnConfiguring(
+        DbContextOptionsBuilder optionsBuilder)
         => optionsBuilder
             .UseMongoDB(
-                connectionString: "mongodb://localhost:50934/?directConnection=true",
-                databaseName: "sample_mflix")
+                "mongodb://localhost:50934/?directConnection=true",
+                "sample_mflix")
             .LogTo(Console.WriteLine, LogLevel.Information);
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -108,7 +133,7 @@ public class MoviesDbContext : DbContext
                 b.Property(e => e.Id);
                 b.Property(e => e.Title).HasElementName("title");
                 b.Property(e => e.Plot).HasElementName("plot");
-                b.Property(e => e.year).HasElementName("year");
+                b.Property(e => e.Year).HasElementName("year");
 
                 b.Property(e => e.PlotEmbedding)
                     .HasElementName("plot_embedding_voyage_3_large")
@@ -117,9 +142,10 @@ public class MoviesDbContext : DbContext
                 b.HasIndex(e => e.PlotEmbedding).IsVectorIndex(
                     VectorSimilarity.DotProduct,
                     dimensions: 2048,
-                    options => options.HasQuantization(VectorQuantization.Scalar)
+                    options => options
+                        .HasQuantization(VectorQuantization.Scalar)
                         .AllowsFiltersOn(e => e.Title)
-                        .AllowsFiltersOn(e => e.year));
+                        .AllowsFiltersOn(e => e.Year));
             });
     }
 
@@ -131,7 +157,7 @@ public class EmbeddedMovie
 {
     public ObjectId Id { get; }
     public required string Title { get; set; }
-    public required int year { get; set; } // Lower-case "year" due to EF-271
+    public required int Year { get; set; }
     public string? Plot { get; set; }
     public float[]? PlotEmbedding { get; set; }
 }

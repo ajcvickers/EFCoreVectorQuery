@@ -9,7 +9,11 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="MongoDB.EntityFrameworkCore" Version="9.0.2" />
+        <PackageReference Include="MongoDB.EntityFrameworkCore" Version="9.0.1-9-gf2b850e" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <None Remove="Scratch.txt" />
     </ItemGroup>
 
 </Project>

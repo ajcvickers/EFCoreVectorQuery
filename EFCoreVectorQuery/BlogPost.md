@@ -18,7 +18,7 @@ public class EmbeddedMovie
 {
     public ObjectId Id { get; }
     public required string Title { get; set; }
-    public required int year { get; set; } // Lower-case "year" due to EF-271
+    public required int Year { get; set; }
     public string? Plot { get; set; }
     public float[]? PlotEmbedding { get; set; }
 }
@@ -29,11 +29,14 @@ The `MoviesDbDbContext` class includes a `DbSet<Movie>` property as the root for
 ```csharp
 public class MoviesDbContext : DbContext
 {
-    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    protected override void OnConfiguring(
+        DbContextOptionsBuilder optionsBuilder)
         => optionsBuilder
             .UseMongoDB(
-                connectionString: "mongodb://localhost:50934/?directConnection=true",
-                databaseName: "sample_mflix")
+                connectionString:
+                "mongodb://localhost:50934/?directConnection=true",
+                databaseName:
+                "sample_mflix")
             .LogTo(Console.WriteLine, LogLevel.Information);
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -46,11 +49,18 @@ public class MoviesDbContext : DbContext
                 b.Property(e => e.Id);
                 b.Property(e => e.Title).HasElementName("title");
                 b.Property(e => e.Plot).HasElementName("plot");
-                b.Property(e => e.year).HasElementName("year");
+                b.Property(e => e.Year).HasElementName("year");
 
                 b.Property(e => e.PlotEmbedding)
                     .HasElementName("plot_embedding_voyage_3_large")
                     .HasBinaryVectorDataType(BinaryVectorDataType.Float32);
+
+                b.HasIndex(e => e.PlotEmbedding).IsVectorIndex(
+                    VectorSimilarity.DotProduct,
+                    dimensions: 2048,
+                    options => options.HasQuantization(VectorQuantization.Scalar)
+                        .AllowsFiltersOn(e => e.Title)
+                        .AllowsFiltersOn(e => e.Year));
             });
     }
 
@@ -70,6 +80,8 @@ public float[]? PlotEmbedding { get; set; }
 ## Using MongoDB Atlas local
 
 We will test our code against MongoDB Atlas local running in Docker, which is fast, cheap, and convenient. Follow [the instructions for setup Atlas local](https://www.mongodb.com/docs/atlas/cli/current/atlas-cli-deploy-local/); it's very easy, even if you don't know Docker.  Alternately, you can [sign up for a free Atlas deployment](https://www.mongodb.com/products/platform), or use an existing Atlas deployment.
+
+> Tip: If you already have an Atlas deployment with the "MFlix" sample data loaded, then you may need to refresh this data, since the dataset is updated periodically. Consider using [MongoDB Compas](https://www.mongodb.com/products/tools/compass) or [mongosh](https://www.mongodb.com/try/download/shell) to examine and/or delete existing data.
 
 Get the connection string for Atlas local using the command `atlas deployments connect`, and copy it into the call to `UseMongoDB`. For example:
 
@@ -149,18 +161,8 @@ b.HasIndex(e => e.PlotEmbedding).IsVectorIndex(
 This defines an index with 2048 dimensions and some other configuration that we will discuss below. However, running the query after adding this code to the model still generates a warning:
 
 ```text
-warn: 10/10/2025 12:47:39.824 MongoEventId.VectorSearchReturnedZeroResults[35014] (Microsoft.EntityFrameworkCore.Query) 
-      The vector query 'embedded_movies.aggregate([{ "$vectorSearch" : { "queryVector" : [-0.069241605699062347, 
-      
-      // Lots more embedding data...
-      
-      0.055000420659780502, 0.0052790581248700619, 0.018415320664644241], "path" : "plot_embedding_voyage_3_large",
-      "limit" : 10, "numCandidates" : 100, "index" : "PlotEmbeddingVectorIndex" } },
-      { "$addFields" : { "__score" : { "$meta" : "vectorSearchScore" } } }])' returned zero results. This could be
-      because either there is no vector index defined for query property, or because vector data (embeddings) have
-      recently been inserted. Consider disabling index creation in 'DbContext.Database.EnsureCreated' and
-      performing initial ingestion before calling 'DbContext.Database.CreateMissingVectorIndexes' and
-      'DbContext.Database.WaitForVectorIndexes'.
+warn: 14/10/2025 11:23:16.057 MongoEventId.VectorSearchReturnedZeroResults[35014] (Microsoft.EntityFrameworkCore.Query) 
+      The vector query against 'EmbeddedMovie.PlotEmbedding' using index 'PlotEmbeddingVectorIndex' returned zero results. This could be because either there is no vector index defined in the database for query property, or because vector data (embeddings) have recently been inserted and the index is still building. Consider disabling index creation in 'DbContext.Database.EnsureCreated' and performing initial ingestion of embeddings, before calling 'DbContext.Database.CreateMissingVectorIndexes' and 'DbContext.Database.WaitForVectorIndexes'.
 ```
 
 This is because we have defined the vector index in the EF Core model, but it has not yet been created in the MongoDB database.
@@ -221,7 +223,25 @@ As we might expect, all the top ten most similar movies also feature James Bond!
 
 > Tip: Only ten results were returned because we set that limit in the query. Limiting in the query this way is a best practice to help reduce the amount of work done by the vector search.
 
-The the plot embedding used in the query does not have to come from an existing movie. Instead, an embedding can be created for any user-supplied fragment of a plot. Creating vector embeddings is beyond the scope of this post; see [How to Create Vector Embeddings](mongodb.com/docs/atlas/atlas-vector-search/create-embeddings/) for full details. Assume we have obtained an embedding for "time travel". We can now use this embedding to find movies about time travel:
+The plot embedding used in the query does not have to come from an existing movie in the database. Instead, an embedding can be created for any user-supplied fragment of a plot. This is achieved by calling an endpoint provided by the embedding model, passing in the text or other data to be embedded. The endpoint returns a list of floating point numbers that represent the embedding.
+
+This process is described in [How to Create Vector Embeddings](https://www.mongodb.com/docs/atlas/atlas-vector-search/create-embeddings) for the "voyage-3-large" model we are using here. Some code adapted from the linked instructions is also [included in the GitHub repo for this post](https://github.com/ajcvickers/EFCoreVectorQuery). Since the sample data contains embeddings with 2048 dimensions, we need to instruct VoyageAI to do the same by specifying "the output_dimension" when calling the endpoint. For example:
+
+```csharp
+var requestBody = new
+{
+    input = texts,
+    model = EmbeddingModelName,
+    truncation = true,
+    output_dimension = 2048
+};
+```
+
+Assume we have obtained an embedding for "time travel".
+
+> Tip: The "time travel" embedding is included in the [code on GitHub](https://github.com/ajcvickers/EFCoreVectorQuery), along with three other sample embeddings for you to use without creating your own.
+
+We can now use this embedding to find movies about time travel:
 
 ```csharp
 var timeTravelEmbedding = new[] {-0.034731735, ... , 040714234};
