@@ -23,7 +23,7 @@ using MongoDB.EntityFrameworkCore.Extensions;
 using var db = new MoviesDbContext();
 
 await db.Database.CreateMissingVectorIndexesAsync();
-await db.Database.WaitForVectorIndexesAsync();
+await db.Database.WaitForVectorIndexesAsync(timeout: TimeSpan.FromMinutes(2));
 
 // Find the embedding for the plot of Octopussy.
 
